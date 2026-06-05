@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/Linka-masterskaya/zip-backend/internal/config"
+	"github.com/Linka-masterskaya/zip-backend/internal/middleware"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func main() {
@@ -28,6 +30,9 @@ func main() {
 	slog.SetDefault(newLogger(cfg.App.Env))
 
 	mux := http.NewServeMux()
+
+	mux.Handle("GET /metrics", promhttp.Handler())
+
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{
@@ -36,9 +41,11 @@ func main() {
 		})
 	})
 
+	wrappedHandler := middleware.Metrics(mux)
+
 	srv := &http.Server{
 		Addr:         ":" + cfg.App.Port,
-		Handler:      mux,
+		Handler:      wrappedHandler,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  60 * time.Second,
