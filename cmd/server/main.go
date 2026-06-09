@@ -1,3 +1,4 @@
+// Command server runs the HTTP API server.
 package main
 
 import (
@@ -11,6 +12,11 @@ import (
 	"time"
 
 	"github.com/Linka-masterskaya/zip-backend/internal/config"
+)
+
+var (
+	version   string
+	buildTime string
 )
 
 func main() {
@@ -28,12 +34,14 @@ func main() {
 	slog.SetDefault(newLogger(cfg.App.Env))
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{
+		if err := json.NewEncoder(w).Encode(map[string]string{
 			"status": "ok",
 			"env":    cfg.App.Env,
-		})
+		}); err != nil {
+			slog.Error("health response encode failed", "err", err)
+		}
 	})
 
 	srv := &http.Server{
@@ -44,7 +52,12 @@ func main() {
 		IdleTimeout:  60 * time.Second,
 	}
 
-	slog.Info("starting server", "addr", srv.Addr, "env", cfg.App.Env)
+	slog.Info("starting server",
+		"addr", srv.Addr,
+		"env", cfg.App.Env,
+		"version", version,
+		"buildTime", buildTime,
+	)
 
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
