@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context" // <-- Добавили импорт
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -11,6 +12,17 @@ import (
 )
 
 type AppHandler func(w http.ResponseWriter, r *http.Request) error
+
+type ctxKeyRequestID struct{}
+
+var requestIDKey = ctxKeyRequestID{}
+
+func GetRequestID(ctx context.Context) string {
+	if id, ok := ctx.Value(requestIDKey).(string); ok {
+		return id
+	}
+	return ""
+}
 
 type ErrorPayload struct {
 	Code      string `json:"code"`
@@ -24,7 +36,10 @@ type JSONErrorResponse struct {
 
 func RecoveryMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		reqID := r.Header.Get("X-Request-Id")
+		reqID := GetRequestID(r.Context())
+		if reqID == "" {
+			reqID = r.Header.Get("X-Request-Id")
+		}
 
 		defer func() {
 			if rec := recover(); rec != nil {
@@ -46,7 +61,10 @@ func RecoveryMiddleware(next http.Handler) http.Handler {
 
 func ErrorMiddleware(next AppHandler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		reqID := r.Header.Get("X-Request-Id")
+		reqID := GetRequestID(r.Context())
+		if reqID == "" {
+			reqID = r.Header.Get("X-Request-Id")
+		}
 
 		if err := next(w, r); err != nil {
 			var appErr *apperr.AppError
