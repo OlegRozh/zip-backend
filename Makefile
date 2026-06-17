@@ -70,3 +70,6 @@ migration-help:
 	@echo "*  make migration-generate NAME=<name>   Create a new migration"
 	@echo "*  make migrate                          Apply all new migrations"
 	@echo "*  make migrate-down                     Roll back the last migration"
+
+migrate-embed:
+    go run ./cmd/server --migrate
