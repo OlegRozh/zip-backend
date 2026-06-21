@@ -22,8 +22,9 @@ type Config struct {
 
 // AppConfig contains application runtime settings.
 type AppConfig struct {
-	Env  string `mapstructure:"env"`
-	Port string `mapstructure:"port"`
+	Env         string `mapstructure:"env"`
+	Port        string `mapstructure:"port"`
+	FrontendURL string `mapstructure:"frontend_url"`
 }
 
 // DBConfig contains database connection settings.

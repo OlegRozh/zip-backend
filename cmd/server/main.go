@@ -71,7 +71,13 @@ func main() {
 	}
 
 	mainMux := http.NewServeMux()
-	wrappedHandler := middleware.RecoveryMiddleware(middleware.Metrics(mainMux))
+	wrappedHandler := middleware.Chain(
+		mainMux,
+		middleware.CORSMiddleware(cfg.App.FrontendURL),
+		middleware.RequestIDMiddleware,
+		middleware.RecoveryMiddleware,
+		middleware.Metrics,
+	)
 
 	srv := &http.Server{
 		Addr:         ":" + cfg.App.Port,
@@ -144,7 +150,6 @@ func main() {
 	if err := redisClient.Close(); err != nil {
 		slog.Error("redis close error", "err", err)
 	}
-
 }
 
 func newLogger(env string) *slog.Logger {

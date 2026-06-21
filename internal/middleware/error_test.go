@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -10,13 +11,13 @@ import (
 )
 
 func TestErrorMiddleware_AppError(t *testing.T) {
-	handler := AppHandler(func(w http.ResponseWriter, r *http.Request) error {
-		return apperr.ErrNotFound.WithMessage("pack not found")
+	handler := AppHandler(func(_ http.ResponseWriter, _ *http.Request) error {
+		return apperr.ErrNotFound
 	})
 
 	mw := ErrorMiddleware(handler)
 
-	req := httptest.NewRequest("GET", "/test", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/test", nil)
 	req.Header.Set("X-Request-Id", "abc-123")
 	rec := httptest.NewRecorder()
 
@@ -43,13 +44,13 @@ func TestErrorMiddleware_AppError(t *testing.T) {
 }
 
 func TestRecoveryMiddleware(t *testing.T) {
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		panic("something went critically wrong")
+	handler := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		panic("something went wrong")
 	})
 
 	mw := RecoveryMiddleware(handler)
 
-	req := httptest.NewRequest("GET", "/test", nil)
+	req := httptest.NewRequestWithContext(context.Background(), "GET", "/test", nil)
 	rec := httptest.NewRecorder()
 
 	mw.ServeHTTP(rec, req)

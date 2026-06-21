@@ -1,9 +1,10 @@
 package middleware
 
 import (
-	"context" // <-- Добавили импорт
+	"context" 
 	"encoding/json"
 	"errors"
+	"log"
 	"log/slog"
 	"net/http"
 	"runtime/debug"
@@ -11,12 +12,14 @@ import (
 	"github.com/Linka-masterskaya/zip-backend/internal/apperr"
 )
 
+// AppHandler описывает сигнатуру хендлера, способного возвращать Go-ошибку напрямую.
 type AppHandler func(w http.ResponseWriter, r *http.Request) error
 
 type ctxKeyRequestID struct{}
 
 var requestIDKey = ctxKeyRequestID{}
 
+// GetRequestID извлекает уникальный ID запроса из контекста выполнения.
 func GetRequestID(ctx context.Context) string {
 	if id, ok := ctx.Value(requestIDKey).(string); ok {
 		return id
@@ -24,16 +27,19 @@ func GetRequestID(ctx context.Context) string {
 	return ""
 }
 
+// ErrorPayload содержит детальную структуру тела ошибки в формате JSON.
 type ErrorPayload struct {
 	Code      string `json:"code"`
 	Message   string `json:"message"`
 	RequestID string `json:"request_id"`
 }
 
+// JSONErrorResponse описывает верхнеуровневый ответ сервера при возникновении ошибки.
 type JSONErrorResponse struct {
 	Error ErrorPayload `json:"error"`
 }
 
+// RecoveryMiddleware перехватывает паники, логирует стектрейс и спасает сервер от падения.
 func RecoveryMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		reqID := GetRequestID(r.Context())
@@ -59,6 +65,7 @@ func RecoveryMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// ErrorMiddleware форматирует возвращаемые хендлерами ошибки в унифицированный JSON.
 func ErrorMiddleware(next AppHandler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		reqID := GetRequestID(r.Context())
@@ -104,5 +111,7 @@ func sendJSONError(w http.ResponseWriter, appErr *apperr.AppError, reqID string)
 		},
 	}
 
-	_ = json.NewEncoder(w).Encode(resp)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		log.Printf("failed to encode error response: %v", err)
+	}
 }
