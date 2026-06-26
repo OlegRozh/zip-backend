@@ -3,8 +3,11 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"flag"
 	"fmt"
+	"log"
 	"log/slog"
 	"net/http"
 	"os"
@@ -12,16 +15,19 @@ import (
 	"syscall"
 	"time"
 
+	_ "github.com/lib/pq"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/Linka-masterskaya/zip-backend/internal/broker"
+	"github.com/Linka-masterskaya/zip-backend/internal/cache"
 	"github.com/Linka-masterskaya/zip-backend/internal/config"
+	"github.com/Linka-masterskaya/zip-backend/internal/db"
 	"github.com/Linka-masterskaya/zip-backend/internal/metrics"
 	"github.com/Linka-masterskaya/zip-backend/internal/middleware"
 	"github.com/Linka-masterskaya/zip-backend/internal/pack"
-	"github.com/Linka-masterskaya/zip-backend/internal/redis"
 	"github.com/Linka-masterskaya/zip-backend/internal/storage"
+	"github.com/Linka-masterskaya/zip-backend/migrations"
 )
 
 var (
@@ -40,6 +46,9 @@ func main() {
 		slog.Error("config load failed", "err", err)
 		os.Exit(1)
 	}
+
+	// Обработка флага --migrate
+	runMigrationsIfNeeded(cfg)
 
 	slog.SetDefault(newLogger(cfg.App.Env))
 
@@ -64,11 +73,21 @@ func main() {
 		}
 	}()
 
-	redisClient, err := redis.NewClient(cfg.Redis.URL)
+	redisClient, err := cache.NewClient(cfg.Redis)
 	if err != nil {
 		slog.Error("redis initialization failed:", "err", err)
 		os.Exit(1)
 	}
+
+	// Postgres. Инициализация
+	dbPool, err := db.New(cfg.DB)
+	if err != nil {
+		slog.Error("postgres initialization failed:", "err", err)
+		os.Exit(1)
+	}
+	defer dbPool.Close()
+
+	slog.Info("database connected", "pool_size", cfg.DB.MaxConns)
 
 	packRepo := pack.NewRepository(redisClient)
 	packService := pack.NewService(packRepo, publisher)
@@ -97,16 +116,8 @@ func main() {
 
 	metricsMux := http.NewServeMux()
 	metricsMux.Handle("GET /metrics", metrics.NewHandler())
-
-	metricsMux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(map[string]string{
-			"status": "ok",
-			"env":    cfg.App.Env,
-		}); err != nil {
-			slog.Error("health response encode failed", "err", err)
-		}
-	})
+	metricsMux.HandleFunc("GET /health", healthHandler(cfg.App.Env))
+	metricsMux.HandleFunc("GET /readyz", readyzHandler(redisClient))
 
 	metricsSrv := &http.Server{
 		Addr:         ":9090",
@@ -185,4 +196,63 @@ func initNATS(cfg config.NATSConfig) (*nats.Conn, *broker.Publisher, error) {
 	publisher := broker.NewPublisher(js)
 
 	return nc, publisher, nil
+}
+
+func healthHandler(env string) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok", "env": env}); err != nil {
+			slog.Error("health response encode failed", "err", err)
+		}
+	}
+}
+
+func readyzHandler(redisClient *cache.Client) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+
+		w.Header().Set("Content-Type", "application/json")
+
+		if err := redisClient.Ping(ctx); err != nil {
+			slog.Error("readyz: redis unavailable", "err", err)
+			w.WriteHeader(http.StatusServiceUnavailable)
+			if err := json.NewEncoder(w).Encode(map[string]string{"status": "redis unavailable"}); err != nil {
+				slog.Error("readyz response encode failed", "err", err)
+			}
+			return
+		}
+
+		if err := json.NewEncoder(w).Encode(map[string]string{"status": "ready"}); err != nil {
+			slog.Error("readyz response encode failed", "err", err)
+		}
+	}
+}
+
+// runMigrationsIfNeeded проверяет флаг --migrate и выполняет миграции, если он установлен.
+func runMigrationsIfNeeded(cfg *config.Config) {
+	migrateFlag := flag.Bool("migrate", false, "Run database migrations and exit")
+	flag.Parse()
+
+	if !*migrateFlag {
+		return
+	}
+
+	// Подключаемся к БД только для миграций
+	dbConn, err := sql.Open("postgres", cfg.DB.URL)
+	if err != nil {
+		slog.Error("failed to connect to postgres for migration", "err", err)
+		os.Exit(1)
+	}
+	defer func() {
+		if err := dbConn.Close(); err != nil {
+			slog.Error("failed to close db connection after migration", "err", err)
+		}
+	}()
+
+	if err := migrations.Run(dbConn); err != nil {
+		log.Fatalf("Migration failed: %v", err)
+	}
+	log.Println("Migrations completed. Exiting.")
+	os.Exit(0)
 }
