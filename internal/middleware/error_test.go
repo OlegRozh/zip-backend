@@ -12,12 +12,15 @@ import (
 
 func TestErrorMiddleware_AppError(t *testing.T) {
 	handler := AppHandler(func(_ http.ResponseWriter, _ *http.Request) error {
-		return apperr.ErrNotFound
+		return apperr.ErrNotFound.WithMessage("pack not found")
 	})
 
-	mw := ErrorMiddleware(handler)
+	mw := RequestIDMiddleware(ErrorMiddleware(handler))
 
-	req := httptest.NewRequestWithContext(context.Background(), "GET", "/test", nil)
+	req, err := http.NewRequestWithContext(context.Background(), "GET", "/test", nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
 	req.Header.Set("X-Request-Id", "abc-123")
 	rec := httptest.NewRecorder()
 
@@ -45,12 +48,15 @@ func TestErrorMiddleware_AppError(t *testing.T) {
 
 func TestRecoveryMiddleware(t *testing.T) {
 	handler := http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
-		panic("something went wrong")
+		panic("something went critically wrong")
 	})
 
 	mw := RecoveryMiddleware(handler)
 
-	req := httptest.NewRequestWithContext(context.Background(), "GET", "/test", nil)
+	req, err := http.NewRequestWithContext(context.Background(), "GET", "/test", nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
 	rec := httptest.NewRecorder()
 
 	mw.ServeHTTP(rec, req)

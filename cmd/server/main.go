@@ -19,6 +19,7 @@ import (
 	"github.com/Linka-masterskaya/zip-backend/internal/config"
 	"github.com/Linka-masterskaya/zip-backend/internal/metrics"
 	"github.com/Linka-masterskaya/zip-backend/internal/middleware"
+	"github.com/Linka-masterskaya/zip-backend/internal/pack"
 	"github.com/Linka-masterskaya/zip-backend/internal/redis"
 	"github.com/Linka-masterskaya/zip-backend/internal/storage"
 )
@@ -62,7 +63,6 @@ func main() {
 			slog.Error("nats drain", "err", err)
 		}
 	}()
-	_ = publisher // временно, пока нет хендлеров в server
 
 	redisClient, err := redis.NewClient(cfg.Redis.URL)
 	if err != nil {
@@ -70,13 +70,21 @@ func main() {
 		os.Exit(1)
 	}
 
+	packRepo := pack.NewRepository(redisClient)
+	packService := pack.NewService(packRepo, publisher)
+	packHandler := pack.NewHandler(packService)
+
 	mainMux := http.NewServeMux()
+	mainMux.Handle("POST /api/v1/packs", middleware.ErrorMiddleware(packHandler.CreatePack))
+	mainMux.Handle("GET /api/v1/packs/{id}", middleware.ErrorMiddleware(packHandler.GetPack))
+	mainMux.Handle("GET /api/v1/packs", middleware.ErrorMiddleware(packHandler.ListPacks))
+
 	wrappedHandler := middleware.Chain(
 		mainMux,
-		middleware.RequestIDMiddleware,
-		middleware.CORSMiddleware(cfg.App.FrontendURL),
-		middleware.Metrics,
 		middleware.RecoveryMiddleware,
+		middleware.RequestIDMiddleware,
+		middleware.Metrics,
+		middleware.CORSMiddleware(cfg.App.FrontendURL),
 	)
 
 	srv := &http.Server{
@@ -136,11 +144,9 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	go func() {
-		if err := metricsSrv.Shutdown(ctx); err != nil {
-			slog.Error("metrics server shutdown error", "err", err)
-		}
-	}()
+	if err := metricsSrv.Shutdown(ctx); err != nil {
+		slog.Error("metrics server shutdown error", "err", err)
+	}
 
 	if err := srv.Shutdown(ctx); err != nil {
 		slog.Error("shutdown error", "err", err)

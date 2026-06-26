@@ -1,18 +1,19 @@
+// Package middleware предоставляет посредников для обработки HTTP-запросов.
 package middleware
 
 import (
-	"context" 
+	"context"
 	"encoding/json"
 	"errors"
-	"log"
 	"log/slog"
 	"net/http"
 	"runtime/debug"
 
 	"github.com/Linka-masterskaya/zip-backend/internal/apperr"
+	"github.com/google/uuid"
 )
 
-// AppHandler описывает сигнатуру хендлера, способного возвращать Go-ошибку напрямую.
+// AppHandler описывает сигнатуру стандартной функции-хендлера, возвращающей ошибку.
 type AppHandler func(w http.ResponseWriter, r *http.Request) error
 
 type ctxKeyRequestID struct{}
@@ -27,28 +28,28 @@ func GetRequestID(ctx context.Context) string {
 	return ""
 }
 
-// ErrorPayload содержит детальную структуру тела ошибки в формате JSON.
-type ErrorPayload struct {
-	Code      string `json:"code"`
-	Message   string `json:"message"`
-	RequestID string `json:"request_id"`
-}
-
-// JSONErrorResponse описывает верхнеуровневый ответ сервера при возникновении ошибки.
-type JSONErrorResponse struct {
-	Error ErrorPayload `json:"error"`
-}
-
-// RecoveryMiddleware перехватывает паники, логирует стектрейс и спасает сервер от падения.
-func RecoveryMiddleware(next http.Handler) http.Handler {
+// RequestIDMiddleware проверяет заголовок X-Request-Id. Если его нет — генерирует новый UUID.
+// Помещает ID в контекст запроса и добавляет его в Response Headers.
+func RequestIDMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		reqID := GetRequestID(r.Context())
+		reqID := r.Header.Get("X-Request-Id")
 		if reqID == "" {
-			reqID = r.Header.Get("X-Request-Id")
+			reqID = uuid.New().String()
 		}
 
+		ctx := context.WithValue(r.Context(), requestIDKey, reqID)
+		w.Header().Set("X-Request-Id", reqID)
+
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+// RecoveryMiddleware перехватывает panic и возвращает внутреннюю ошибку сервера.
+func RecoveryMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if rec := recover(); rec != nil {
+				reqID := GetRequestID(r.Context())
 				stack := debug.Stack()
 
 				slog.Error("panic recovered",
@@ -65,15 +66,11 @@ func RecoveryMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// ErrorMiddleware форматирует возвращаемые хендлерами ошибки в унифицированный JSON.
+// ErrorMiddleware обрабатывает возвращаемые хендлером ошибки и преобразует их в JSON.
 func ErrorMiddleware(next AppHandler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		reqID := GetRequestID(r.Context())
-		if reqID == "" {
-			reqID = r.Header.Get("X-Request-Id")
-		}
-
 		if err := next(w, r); err != nil {
+			reqID := GetRequestID(r.Context())
 			var appErr *apperr.AppError
 
 			if !errors.As(err, &appErr) {
@@ -112,6 +109,18 @@ func sendJSONError(w http.ResponseWriter, appErr *apperr.AppError, reqID string)
 	}
 
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		log.Printf("failed to encode error response: %v", err)
+		slog.Error("failed to encode json error response", "err", err)
 	}
+}
+
+// ErrorPayload описывает структуру полезной нагрузки ошибки внутри JSON-ответа.
+type ErrorPayload struct {
+	Code      string `json:"code"`
+	Message   string `json:"message"`
+	RequestID string `json:"request_id"`
+}
+
+// JSONErrorResponse описывает стандартный формат ответа API при возникновении ошибки.
+type JSONErrorResponse struct {
+	Error ErrorPayload `json:"error"`
 }
