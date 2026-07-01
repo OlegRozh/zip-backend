@@ -8,7 +8,7 @@ import (
 	"net/http"
 )
 
-type Handler struct {
+type AuthHandler struct {
 	service *Service
 }
 
@@ -21,13 +21,13 @@ type LoginResponse struct {
 	AccessToken string `json:"access_token"`
 }
 
-func NewHandler(s *Service) *Handler {
-	return &Handler{
+func NewAuthHandler(s *Service) *AuthHandler {
+	return &AuthHandler{
 		service: s,
 	}
 }
 
-func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
+func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return

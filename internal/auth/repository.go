@@ -32,7 +32,11 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 
 func (r *Repository) GetUserByEmail(ctx context.Context, email string) (*User, error) {
 	var user User
-	query := `SELECT id, org_id, email, password_hash, role, email_verified FROM users WHERE email = $1`
+	query := `
+	SELECT id, org_id, email, password_hash, role, email_verified
+	FROM users
+	WHERE email = $1 AND deleted_at IS NULL
+	`
 	row := r.pool.QueryRow(ctx, query, email)
 	err := row.Scan(&user.ID, &user.OrgID, &user.Email, &user.PasswordHash, &user.Role, &user.EmailVerified)
 	if errors.Is(err, pgx.ErrNoRows) {

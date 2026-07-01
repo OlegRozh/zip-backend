@@ -110,7 +110,7 @@ func main() {
 		serviceCfg,
 	)
 
-	authHandler := auth.NewHandler(authService)
+	authHandler := auth.NewAuthHandler(authService)
 	mainMux.HandleFunc("POST /auth/login", authHandler.Login)
 
 	srv := &http.Server{
