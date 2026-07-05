@@ -60,9 +60,7 @@ func (r *Repository) RestoreAvatarIfEmpty(ctx context.Context, userID string, ol
 	if err != nil {
 		return false, fmt.Errorf("begin restore avatar tx: %w", err)
 	}
-	defer func() {
-		_ = tx.Rollback(ctx)
-	}()
+	defer rollbackAvatarTx(ctx, tx)
 
 	current, err := lockUserAvatar(ctx, tx, userID)
 	if err != nil {
@@ -134,9 +132,7 @@ func (r *Repository) changeAvatar(
 	if err != nil {
 		return AvatarChange{}, fmt.Errorf("begin avatar tx: %w", err)
 	}
-	defer func() {
-		_ = tx.Rollback(ctx)
-	}()
+	defer rollbackAvatarTx(ctx, tx)
 
 	current, err := lockUserAvatar(ctx, tx, userID)
 	if err != nil {
@@ -171,6 +167,13 @@ func (r *Repository) changeAvatar(
 		OldSize: oldSize,
 		OrgID:   current.OrgID,
 	}, nil
+}
+
+func rollbackAvatarTx(ctx context.Context, tx pgx.Tx) {
+	err := tx.Rollback(ctx)
+	if err != nil && !errors.Is(err, pgx.ErrTxClosed) {
+		return
+	}
 }
 
 func lockUserAvatar(ctx context.Context, tx pgx.Tx, userID string) (UserAvatar, error) {
