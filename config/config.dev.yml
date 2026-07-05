@@ -97,6 +97,12 @@ auth:
   bcrypt_cost: 12
   login_rate_limit: 5
   require_email_verification: false
+  login_rate_limit: 5
+  pack_rate_limit: 60
+  forgot_rate_limit: 3
+  reset_rate_limit: 3
+  verify_resend_rate_limit: 3
+  email_confirm_rate_limit: 10
 
 cors:
   allow_origins:

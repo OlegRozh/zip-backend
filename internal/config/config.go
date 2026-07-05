@@ -153,8 +153,13 @@ type AuthConfig struct {
 	ResetPasswordTokenTTL    time.Duration `mapstructure:"reset_password_token_ttl"`
 	EmailChangeTokenTTL      time.Duration `mapstructure:"email_change_token_ttl"`
 	BcryptCost               int           `mapstructure:"bcrypt_cost"`
-	LoginRateLimit           int           `mapstructure:"login_rate_limit"`
-	RequireEmailVerification bool          `mapstructure:"require_email_verification"`
+	RequireEmailVerification bool          `yaml:"require_email_verification" env:"AUTH_REQUIRE_EMAIL_VERIFICATION" env-default:"false"`
+	LoginRateLimit           int           `yaml:"login_rate_limit" env:"AUTH_LOGIN_RATE_LIMIT" env-default:"5"`
+	PackRateLimit            int           `yaml:"pack_rate_limit" env:"AUTH_PACK_RATE_LIMIT" env-default:"60"`
+	ForgotRateLimit          int           `yaml:"forgot_rate_limit" env:"AUTH_FORGOT_RATE_LIMIT" env-default:"3"`
+	ResetRateLimit           int           `yaml:"reset_rate_limit" env:"AUTH_RESET_RATE_LIMIT" env-default:"3"`
+	VerifyResendRateLimit    int           `yaml:"verify_resend_rate_limit" env:"AUTH_VERIFY_RESEND_RATE_LIMIT" env-default:"3"`
+	EmailConfirmRateLimit    int           `yaml:"email_confirm_rate_limit" env:"AUTH_EMAIL_CONFIRM_RATE_LIMIT" env-default:"10"`
 }
 
 // CORSConfig contains CORS settings.
