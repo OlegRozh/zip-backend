@@ -92,6 +92,7 @@ func (c *Checker) Run(ctx context.Context) (int, interface{}) {
 		})
 	}
 
+	//nolint:errcheck // ошибки g.Wait игнорируются, т.к. все проверки уже обработаны в results
 	_ = g.Wait()
 
 	finalStatus := "ok"

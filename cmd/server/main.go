@@ -240,13 +240,15 @@ func runMigrationsIfNeeded(cfg *config.Config) {
 	os.Exit(0)
 }
 
-// setupHealthEndpoints регистрирует эндпоинты /livez и /readyz на основном мультиплексоре (AB-16).
+// setupHealthEndpoints регистрирует эндпоинты /livez и /readyz на основном мультиплексоре.
 func setupHealthEndpoints(mux *http.ServeMux, checker *health.Checker) {
 	// /livez — всегда 200 OK, без проверок
 	mux.HandleFunc("GET /livez", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]string{"status": "alive"})
+		if err := json.NewEncoder(w).Encode(map[string]string{"status": "alive"}); err != nil {
+			slog.Error("failed to encode /livez response", "err", err)
+		}
 	})
 
 	// /readyz — проверяет все зависимости параллельно с таймаутом 2 сек.
@@ -254,6 +256,8 @@ func setupHealthEndpoints(mux *http.ServeMux, checker *health.Checker) {
 		status, body := checker.Run(r.Context())
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(status)
-		json.NewEncoder(w).Encode(body)
+		if err := json.NewEncoder(w).Encode(body); err != nil {
+			slog.Error("failed to encode /readyz response", "err", err)
+		}
 	})
 }
