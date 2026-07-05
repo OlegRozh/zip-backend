@@ -13,12 +13,13 @@ type AppError struct {
 
 // Стандартные ошибки приложения для использования в хендлерах.
 var (
-	ErrNotFound     = &AppError{Code: "NOT_FOUND", HTTPStatus: 404, Message: "resource not found"}
-	ErrUnauthorized = &AppError{Code: "UNAUTHORIZED", HTTPStatus: 401, Message: "unauthorized"}
-	ErrForbidden    = &AppError{Code: "FORBIDDEN", HTTPStatus: 403, Message: "forbidden"}
-	ErrBadRequest   = &AppError{Code: "BAD_REQUEST", HTTPStatus: 400, Message: "bad request"}
-	ErrConflict     = &AppError{Code: "CONFLICT", HTTPStatus: 409, Message: "conflict"}
-	ErrInternal     = &AppError{Code: "INTERNAL", HTTPStatus: 500, Message: "internal server error"}
+	ErrNotFound        = &AppError{Code: "NOT_FOUND", HTTPStatus: 404, Message: "resource not found"}
+	ErrUnauthorized    = &AppError{Code: "UNAUTHORIZED", HTTPStatus: 401, Message: "unauthorized"}
+	ErrForbidden       = &AppError{Code: "FORBIDDEN", HTTPStatus: 403, Message: "forbidden"}
+	ErrBadRequest      = &AppError{Code: "BAD_REQUEST", HTTPStatus: 400, Message: "bad request"}
+	ErrConflict        = &AppError{Code: "CONFLICT", HTTPStatus: 409, Message: "conflict"}
+	ErrInternal        = &AppError{Code: "INTERNAL", HTTPStatus: 500, Message: "internal server error"}
+	ErrPayloadTooLarge = &AppError{Code: "PAYLOAD_TOO_LARGE", HTTPStatus: 413, Message: "payload too large"}
 )
 
 func (e *AppError) Error() string {

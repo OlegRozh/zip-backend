@@ -27,6 +27,7 @@ import (
 	"github.com/Linka-masterskaya/zip-backend/internal/metrics"
 	"github.com/Linka-masterskaya/zip-backend/internal/middleware"
 	"github.com/Linka-masterskaya/zip-backend/internal/pack"
+	"github.com/Linka-masterskaya/zip-backend/internal/profile"
 	"github.com/Linka-masterskaya/zip-backend/internal/storage"
 	"github.com/Linka-masterskaya/zip-backend/migrations"
 )
@@ -57,7 +58,8 @@ func main() {
 
 	// Пока инициализируем MinIO только для проверки подключения и создания bucket при старте
 	// Клиент будет сохранен и передан в сервисы позже, когда появятся операции с объектами
-	if _, err := storage.New(cfg.MinIO); err != nil {
+	storageClient, err := storage.New(cfg.MinIO)
+	if err != nil {
 		slog.Error("minio connect failed", logger.Err(err)) //nolint:gosec // ошибка на старте приложения.
 		os.Exit(1)
 	}
@@ -94,10 +96,23 @@ func main() {
 	packService := pack.NewService(packRepo, publisher)
 	packHandler := pack.NewHandler(packService)
 
+	profileRepo := profile.NewRepository(dbPool)
+	profileService := profile.NewService(profileRepo, storageClient)
+	profileHandler := profile.NewHandler(profileService)
+	authenticated := middleware.AuthMiddleware(cfg.JWT.Secret)
+
 	mainMux := http.NewServeMux()
 	mainMux.Handle("POST /api/v1/packs", middleware.ErrorMiddleware(packHandler.CreatePack))
 	mainMux.Handle("GET /api/v1/packs/{id}", middleware.ErrorMiddleware(packHandler.GetPack))
 	mainMux.Handle("GET /api/v1/packs", middleware.ErrorMiddleware(packHandler.ListPacks))
+	mainMux.Handle("PUT /api/v1/profile/me/avatar", middleware.Chain(
+		middleware.ErrorMiddleware(profileHandler.UploadAvatar),
+		authenticated,
+	))
+	mainMux.Handle("DELETE /api/v1/profile/me/avatar", middleware.Chain(
+		middleware.ErrorMiddleware(profileHandler.DeleteAvatar),
+		authenticated,
+	))
 
 	wrappedHandler := middleware.Chain(
 		mainMux,
