@@ -16,6 +16,7 @@ import (
 
 const avatarURLTTL = 15 * time.Minute
 
+// ObjectStorage is the MinIO subset required by profile avatars.
 type ObjectStorage interface {
 	PutObject(ctx context.Context, key string, reader io.Reader, size int64, contentType string) error
 	RemoveObject(ctx context.Context, key string) error
@@ -23,7 +24,9 @@ type ObjectStorage interface {
 	PresignedURL(ctx context.Context, key string, ttl time.Duration) (string, error)
 }
 
+// AvatarRepository is the persistence subset required by profile avatars.
 type AvatarRepository interface {
+	StorageQuota(ctx context.Context, userID string) (StorageQuota, error)
 	ReplaceAvatar(ctx context.Context, userID string, newKey string, newSize int64, objectSize ObjectSizeFunc) (AvatarChange, error)
 	ClearAvatar(ctx context.Context, userID string, objectSize ObjectSizeFunc) (AvatarChange, error)
 	RestoreAvatarIfEmpty(ctx context.Context, userID string, oldKey string, oldSize int64) (bool, error)
@@ -31,16 +34,23 @@ type AvatarRepository interface {
 	CurrentAvatarKey(ctx context.Context, userID string) (string, error)
 }
 
+// Service contains avatar business logic.
 type Service struct {
 	repo    AvatarRepository
 	storage ObjectStorage
 }
 
+// NewService creates profile service.
 func NewService(repo AvatarRepository, storageClient ObjectStorage) *Service {
 	return &Service{repo: repo, storage: storageClient}
 }
 
+// ReplaceAvatar uploads a new avatar, stores its key, updates org usage, and removes the old object.
 func (s *Service) ReplaceAvatar(ctx context.Context, userID string, reader io.Reader, size int64, mimeType string) (string, error) {
+	if err := s.ensureStorageQuota(ctx, userID, size); err != nil {
+		return "", err
+	}
+
 	newKey := avatarKey(userID)
 	if err := s.storage.PutObject(ctx, newKey, reader, size, mimeType); err != nil {
 		return "", fmt.Errorf("put avatar object: %w", err)
@@ -65,6 +75,7 @@ func (s *Service) ReplaceAvatar(ctx context.Context, userID string, reader io.Re
 	return s.currentAvatarURL(ctx, userID, newKey, avatarURL), nil
 }
 
+// DeleteAvatar removes the current avatar object, clears the DB key, and updates org usage.
 func (s *Service) DeleteAvatar(ctx context.Context, userID string) error {
 	change, err := s.repo.ClearAvatar(ctx, userID, s.objectSize)
 	if err != nil {
@@ -74,6 +85,25 @@ func (s *Service) DeleteAvatar(ctx context.Context, userID string) error {
 	if err := s.removeObject(ctx, change.OldKey); err != nil {
 		s.restoreDeletedAvatar(ctx, userID, change, err)
 		return err
+	}
+	return nil
+}
+
+func (s *Service) ensureStorageQuota(ctx context.Context, userID string, size int64) error {
+	quota, err := s.repo.StorageQuota(ctx, userID)
+	if err != nil {
+		return profileError(err)
+	}
+	if !quota.HasOrg {
+		return apperr.ErrForbidden.WithMessage("user organization is required for avatar upload")
+	}
+
+	availableBytes := quota.QuotaBytes - quota.UsedBytes
+	if availableBytes < 0 {
+		availableBytes = 0
+	}
+	if size > availableBytes {
+		return apperr.ErrForbidden.WithMessage("organization storage quota exceeded")
 	}
 	return nil
 }
@@ -157,6 +187,9 @@ func (s *Service) restoreDeletedAvatar(ctx context.Context, userID string, chang
 func profileError(err error) error {
 	if errors.Is(err, ErrUserNotFound) {
 		return apperr.ErrUnauthorized
+	}
+	if errors.Is(err, ErrStorageQuotaExceeded) {
+		return apperr.ErrForbidden.WithMessage("organization storage quota exceeded")
 	}
 	return err
 }
