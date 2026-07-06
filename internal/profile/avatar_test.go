@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Linka-masterskaya/zip-backend/internal/apperr"
 	"github.com/Linka-masterskaya/zip-backend/internal/middleware"
 	"github.com/Linka-masterskaya/zip-backend/internal/reqctx"
 	"github.com/Linka-masterskaya/zip-backend/internal/storage"
@@ -91,6 +92,32 @@ func TestDetectAvatarMIME_AllowsPNGJPEGWEBP(t *testing.T) {
 		if got := detectAvatarMIME(data); got != want {
 			t.Fatalf("expected %s, got %q", want, got)
 		}
+	}
+}
+
+func TestReplaceAvatar_QuotaExceededSkipsPutObject(t *testing.T) {
+	ctx := context.Background()
+	repo := newFakeAvatarRepo()
+	store := newFakeObjectStorage()
+	repo.storageUsed = 100
+	repo.storageQuota = 110
+	newData := pngAvatarBytes(16)
+
+	service := NewService(repo, store)
+	_, err := service.ReplaceAvatar(ctx, "user-1", bytes.NewReader(newData), int64(len(newData)), "image/png")
+	if err == nil {
+		t.Fatal("expected quota exceeded error")
+	}
+
+	var appErr *apperr.AppError
+	if !errors.As(err, &appErr) || appErr.HTTPStatus != http.StatusForbidden {
+		t.Fatalf("expected forbidden app error, got %v", err)
+	}
+	if store.objectCount() != 0 {
+		t.Fatal("quota check must happen before PutObject")
+	}
+	if repo.avatarKeyValue() != "" {
+		t.Fatalf("avatar key must not change on quota exceeded, got %q", repo.avatarKeyValue())
 	}
 }
 
@@ -203,10 +230,10 @@ func multipartAvatarRequest(t *testing.T, data []byte, filename string) *http.Re
 		t.Fatalf("close multipart writer: %v", err)
 	}
 
-	req := httptest.NewRequestWithContext(context.Background(), http.MethodPut, "/api/v1/profile/me/avatar", &body)
+	ctx := reqctx.PutUserID(context.Background(), "user-1")
+	req := httptest.NewRequestWithContext(ctx, http.MethodPut, "/api/v1/profile/me/avatar", &body)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
-	ctx := reqctx.PutUserID(req.Context(), "user-1")
-	return req.WithContext(ctx)
+	return req
 }
 
 func pngAvatarBytes(payloadSize int) []byte {
@@ -318,14 +345,26 @@ type fakeAvatarRepo struct {
 	avatarKey           string
 	currentAfterReplace string
 	storageUsed         int64
+	storageQuota        int64
 	orgID               sql.NullString
 	onReplace           func()
 }
 
 func newFakeAvatarRepo() *fakeAvatarRepo {
 	return &fakeAvatarRepo{
-		orgID: sql.NullString{String: "org-1", Valid: true},
+		storageQuota: 10 * 1024 * 1024 * 1024,
+		orgID:        sql.NullString{String: "org-1", Valid: true},
 	}
+}
+
+func (r *fakeAvatarRepo) StorageQuota(_ context.Context, _ string) (StorageQuota, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return StorageQuota{
+		UsedBytes:  r.storageUsed,
+		QuotaBytes: r.storageQuota,
+		HasOrg:     r.orgID.Valid,
+	}, nil
 }
 
 func (r *fakeAvatarRepo) ReplaceAvatar(
