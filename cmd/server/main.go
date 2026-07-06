@@ -105,12 +105,12 @@ func main() {
 	})
 	authHandler := auth.NewAuthHandler(authService)
 
-	packRateLimit := middleware.RateLimit(redisClient, "packs_api", int64(cfg.Auth.PackRateLimit), 1*time.Minute, nil)
-	loginRateLimit := middleware.RateLimit(redisClient, "login", int64(cfg.Auth.LoginRateLimit), 1*time.Minute, nil)
-	forgotRateLimit := middleware.RateLimit(redisClient, "forgot", int64(cfg.Auth.ForgotRateLimit), 1*time.Minute, nil)
-	resetRateLimit := middleware.RateLimit(redisClient, "reset", int64(cfg.Auth.ResetRateLimit), 1*time.Minute, nil)
-	verifyResendRateLimit := middleware.RateLimit(redisClient, "verify-resend", int64(cfg.Auth.VerifyResendRateLimit), 1*time.Minute, nil)
-	emailConfirmRateLimit := middleware.RateLimit(redisClient, "email-confirm", int64(cfg.Auth.EmailConfirmRateLimit), 1*time.Minute, nil)
+	packRateLimit := middleware.RateLimit(redisClient, "packs_api", int64(cfg.Auth.PackRateLimit), 1*time.Minute, cfg.App.TrustedProxies)
+	loginRateLimit := middleware.RateLimit(redisClient, "login", int64(cfg.Auth.LoginRateLimit), 1*time.Minute, cfg.App.TrustedProxies)
+	forgotRateLimit := middleware.RateLimit(redisClient, "forgot", int64(cfg.Auth.ForgotRateLimit), 1*time.Minute, cfg.App.TrustedProxies)
+	resetRateLimit := middleware.RateLimit(redisClient, "reset", int64(cfg.Auth.ResetRateLimit), 1*time.Minute, cfg.App.TrustedProxies)
+	verifyResendRateLimit := middleware.RateLimit(redisClient, "verify-resend", int64(cfg.Auth.VerifyResendRateLimit), 1*time.Minute, cfg.App.TrustedProxies)
+	emailConfirmRateLimit := middleware.RateLimit(redisClient, "email-confirm", int64(cfg.Auth.EmailConfirmRateLimit), 1*time.Minute, cfg.App.TrustedProxies)
 
 	mainMux := http.NewServeMux()
 	mainMux.Handle("POST /api/v1/packs", packRateLimit(middleware.ErrorMiddleware(packHandler.CreatePack)))
