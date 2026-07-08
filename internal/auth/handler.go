@@ -28,11 +28,6 @@ func NewAuthHandler(s *Service) *AuthHandler {
 }
 
 func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
 	defer func() {
 		if err := r.Body.Close(); err != nil {
 			slog.Error("close request body", "err", err)

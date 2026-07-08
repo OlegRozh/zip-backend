@@ -35,7 +35,7 @@ func (r *Repository) GetUserByEmail(ctx context.Context, email string) (*User, e
 	query := `
 	SELECT id, org_id, email, password_hash, role, email_verified
 	FROM users
-	WHERE email = $1 AND deleted_at IS NULL
+	WHERE email = $1
 	`
 	row := r.pool.QueryRow(ctx, query, email)
 	err := row.Scan(&user.ID, &user.OrgID, &user.Email, &user.PasswordHash, &user.Role, &user.EmailVerified)
