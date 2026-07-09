@@ -106,13 +106,16 @@ func main() {
 	packService := pack.NewService(packRepo, publisher)
 	packHandler := pack.NewHandler(packService)
 
-	authRepo := auth.NewRepository(dbPool)
-	authService := auth.NewService(authRepo, redisClient, &auth.ServiceConfig{
+	serviceCfg := &auth.ServiceConfig{
 		JWTSecret:                cfg.JWT.Secret,
 		AccessTokenTTL:           cfg.Auth.AccessTokenTTL,
 		RefreshTokenTTL:          cfg.Auth.RefreshTokenTTL,
 		RequireEmailVerification: cfg.Auth.RequireEmailVerification,
-	})
+		CookieSecure:             cfg.Auth.CookieSecure,
+	}
+
+	authRepo := auth.NewRepository(dbPool)
+	authService := auth.NewService(authRepo, redisClient, serviceCfg, cryptoService)
 	authHandler := auth.NewAuthHandler(authService)
 
 	packRateLimit := middleware.RateLimit(redisClient, "packs_api", int64(cfg.Auth.PackRateLimit), 1*time.Minute, cfg.App.TrustedProxies)
@@ -140,26 +143,6 @@ func main() {
 		middleware.Metrics,
 		middleware.CORSMiddleware(cfg.App.FrontendURL),
 	)
-
-	serviceCfg := &auth.ServiceConfig{
-		JWTSecret:                cfg.JWT.Secret,
-		AccessTokenTTL:           cfg.Auth.AccessTokenTTL,
-		RefreshTokenTTL:          cfg.Auth.RefreshTokenTTL,
-		RequireEmailVerification: cfg.Auth.RequireEmailVerification,
-		CookieSecure:             cfg.Auth.CookieSecure,
-	}
-
-	authRepo := auth.NewRepository(dbPool)
-
-	authService := auth.NewService(
-		authRepo,
-		redisClient,
-		serviceCfg,
-		cryptoService,
-	)
-
-	authHandler := auth.NewAuthHandler(authService)
-	mainMux.HandleFunc("POST /auth/login", authHandler.Login)
 
 	srv := &http.Server{
 		Addr:         ":" + cfg.App.Port,
