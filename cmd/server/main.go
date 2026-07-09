@@ -30,6 +30,7 @@ import (
 	"github.com/Linka-masterskaya/zip-backend/internal/pack"
 	"github.com/Linka-masterskaya/zip-backend/internal/storage"
 	"github.com/Linka-masterskaya/zip-backend/migrations"
+	"github.com/Linka-masterskaya/zip-backend/pkg/linka/cryptox"
 )
 
 var (
@@ -75,6 +76,15 @@ func main() {
 		}
 	}()
 
+	cryptoService, err := cryptox.New(
+		[]byte(cfg.Crypto.AESKey),
+		[]byte(cfg.Crypto.HMACKey),
+	)
+	if err != nil {
+		slog.Error("crypto initialization failed", logger.Err(err))
+		os.Exit(1)
+	}
+
 	redisClient, err := cache.NewClient(cfg.Redis)
 	if err != nil {
 		slog.Error("redis initialization failed:", logger.Err(err)) //nolint:gosec // ошибка на старте приложения.
@@ -113,6 +123,7 @@ func main() {
 		AccessTokenTTL:           cfg.Auth.AccessTokenTTL,
 		RefreshTokenTTL:          cfg.Auth.RefreshTokenTTL,
 		RequireEmailVerification: cfg.Auth.RequireEmailVerification,
+		CookieSecure:             cfg.Auth.CookieSecure,
 	}
 
 	authRepo := auth.NewRepository(dbPool)
@@ -121,6 +132,7 @@ func main() {
 		authRepo,
 		redisClient,
 		serviceCfg,
+		cryptoService,
 	)
 
 	authHandler := auth.NewAuthHandler(authService)

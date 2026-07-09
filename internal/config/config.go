@@ -23,6 +23,13 @@ type Config struct {
 	CORS         CORSConfig         `mapstructure:"cors"`
 	OpenAI       OpenAIConfig       `mapstructure:"openai"`
 	PicturesBank PicturesBankConfig `mapstructure:"pictures_bank"`
+	Crypto       CryptoConfig       `mapstructure:"crypto"`
+}
+
+// CryptoConfig contains encryption and hashing settings.
+type CryptoConfig struct {
+	AESKey  string `mapstructure:"aes_key"`
+	HMACKey string `mapstructure:"hmac_key"`
 }
 
 // AppConfig contains application runtime settings.
@@ -156,6 +163,7 @@ type AuthConfig struct {
 	BcryptCost               int           `mapstructure:"bcrypt_cost"`
 	LoginRateLimit           int           `mapstructure:"login_rate_limit"`
 	RequireEmailVerification bool          `mapstructure:"require_email_verification"`
+	CookieSecure             bool          `mapstructure:"cookie_secure"`
 }
 
 // CORSConfig contains CORS settings.
@@ -277,6 +285,10 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("smtp.tls", true)
 	v.SetDefault("smtp.timeout", "10s")
 
+	// Crypto defaults
+	v.SetDefault("crypto.aes_key", "")
+	v.SetDefault("crypto.hmac_key", "")
+
 	// Auth defaults
 	v.SetDefault("auth.access_token_ttl", "15m")
 	v.SetDefault("auth.refresh_token_ttl", "720h")
@@ -286,6 +298,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("auth.bcrypt_cost", 12)
 	v.SetDefault("auth.login_rate_limit", 5)
 	v.SetDefault("auth.require_email_verification", false)
+	v.SetDefault("auth.cookie_secure", false)
 
 	// CORS defaults
 	v.SetDefault("cors.allow_origins", []string{"http://localhost:8080"})
@@ -355,6 +368,13 @@ func validateConfig(cfg *Config) error {
 	}
 	if len(cfg.JWT.Secret) < 32 {
 		return fmt.Errorf("jwt.secret must be at least 32 characters")
+	}
+
+	if len(cfg.Crypto.AESKey) != 32 {
+		return fmt.Errorf("crypto.aes_key must be 32 bytes")
+	}
+	if len(cfg.Crypto.HMACKey) != 32 {
+		return fmt.Errorf("crypto.hmac_key must be 32 bytes")
 	}
 
 	return nil

@@ -14,7 +14,6 @@ var ErrUserNotFound = errors.New("user not found")
 type User struct {
 	ID            string
 	OrgID         *string
-	Email         string
 	PasswordHash  *string
 	Role          string
 	EmailVerified bool
@@ -30,20 +29,21 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 	}
 }
 
-func (r *Repository) GetUserByEmail(ctx context.Context, email string) (*User, error) {
+func (r *Repository) GetUserByEmailHash(ctx context.Context, emailHash []byte) (*User, error) {
 	var user User
 	query := `
-	SELECT id, org_id, email, password_hash, role, email_verified
+	SELECT users.id, users.org_id, auth_cred.password_hash, auth_cred.role, users.email_verified
 	FROM users
-	WHERE email = $1
+	JOIN auth_cred ON auth_cred.user_id = users.id
+	WHERE auth_cred.email_hash = $1
 	`
-	row := r.pool.QueryRow(ctx, query, email)
-	err := row.Scan(&user.ID, &user.OrgID, &user.Email, &user.PasswordHash, &user.Role, &user.EmailVerified)
+	row := r.pool.QueryRow(ctx, query, emailHash)
+	err := row.Scan(&user.ID, &user.OrgID, &user.PasswordHash, &user.Role, &user.EmailVerified)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrUserNotFound
 	}
 	if err != nil {
-		return nil, fmt.Errorf("get user by email: %w", err)
+		return nil, fmt.Errorf("get user by email hash: %w", err)
 	}
 	return &user, nil
 }

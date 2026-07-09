@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Linka-masterskaya/zip-backend/internal/cache"
@@ -13,11 +14,25 @@ import (
 
 var ErrInvalidCredentials = errors.New("invalid credentials")
 var ErrEmailNotVerified = errors.New("email not verified")
+var dummyPasswordHash = []byte("$2a$10$UlCQgLZoLjUzrtYRUUlkPeh/m5L2pl9aYzDTUaZAD3R4Pd8ONSof6")
 
 type Service struct {
-	repo  *Repository
-	cache *cache.Client
-	cfg   *ServiceConfig
+	repo   userRepository
+	cache  refreshStore
+	cfg    *ServiceConfig
+	crypto emailHasher
+}
+
+type userRepository interface {
+	GetUserByEmailHash(ctx context.Context, emailHash []byte) (*User, error)
+}
+
+type refreshStore interface {
+	StoreRefresh(ctx context.Context, jti string, rec cache.RefreshRecord, ttl time.Duration) error
+}
+
+type emailHasher interface {
+	Hash(data []byte) []byte
 }
 
 type ServiceConfig struct {
@@ -25,6 +40,7 @@ type ServiceConfig struct {
 	AccessTokenTTL           time.Duration
 	RefreshTokenTTL          time.Duration
 	RequireEmailVerification bool
+	CookieSecure             bool
 }
 
 type LoginResult struct {
@@ -32,23 +48,28 @@ type LoginResult struct {
 	RefreshToken string
 }
 
-func NewService(repo *Repository, cache *cache.Client, cfg *ServiceConfig) *Service {
+func NewService(repo userRepository, cache refreshStore, cfg *ServiceConfig, crypto emailHasher) *Service {
 	return &Service{
-		repo:  repo,
-		cache: cache,
-		cfg:   cfg,
+		repo:   repo,
+		cache:  cache,
+		cfg:    cfg,
+		crypto: crypto,
 	}
 }
 
 func (s *Service) Login(ctx context.Context, email, password string) (*LoginResult, error) {
-	user, err := s.repo.GetUserByEmail(ctx, email)
+	email = strings.TrimSpace(strings.ToLower(email))
+	emailHash := s.crypto.Hash([]byte(email))
+	user, err := s.repo.GetUserByEmailHash(ctx, emailHash)
 	if errors.Is(err, ErrUserNotFound) {
+		_ = bcrypt.CompareHashAndPassword(dummyPasswordHash, []byte(password))
 		return nil, ErrInvalidCredentials
 	}
 	if err != nil {
-		return nil, fmt.Errorf("get user by email error: %w", err)
+		return nil, fmt.Errorf("get user by email hash: %w", err)
 	}
 	if user.PasswordHash == nil {
+		_ = bcrypt.CompareHashAndPassword(dummyPasswordHash, []byte(password))
 		return nil, ErrInvalidCredentials
 	}
 	if err := bcrypt.CompareHashAndPassword([]byte(*user.PasswordHash), []byte(password)); err != nil {

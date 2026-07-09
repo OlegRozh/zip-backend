@@ -60,7 +60,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		MaxAge:   int(h.service.cfg.RefreshTokenTTL.Seconds()),
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   h.service.cfg.CookieSecure,
 		SameSite: http.SameSiteLaxMode,
 	})
 
