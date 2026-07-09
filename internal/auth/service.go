@@ -17,6 +17,14 @@ var ErrEmailNotVerified = errors.New("email not verified")
 
 var dummyPasswordHash = []byte("$2a$10$UlCQgLZoLjUzrtYRUUlkPeh/m5L2pl9aYzDTUaZAD3R4Pd8ONSof6")
 
+// runDummyPasswordCompare performs a bcrypt comparison only to keep the
+// execution time similar for existing and non-existing users.
+//
+//nolint:errcheck // result is intentionally ignored for timing consistency.
+func runDummyPasswordCompare(password string) {
+	_ = bcrypt.CompareHashAndPassword(dummyPasswordHash, []byte(password))
+}
+
 type userRepository interface {
 	GetUserByEmailHash(ctx context.Context, emailHash []byte) (*User, error)
 }
@@ -64,9 +72,7 @@ func (s *Service) Login(ctx context.Context, email, password string) (*LoginResu
 
 	user, err := s.repo.GetUserByEmailHash(ctx, emailHash)
 	if errors.Is(err, ErrUserNotFound) {
-		if compareErr := bcrypt.CompareHashAndPassword(dummyPasswordHash, []byte(password)); compareErr != nil {
-			// intentionally ignored: dummy compare is only for timing consistency
-		}
+		runDummyPasswordCompare(password)
 		return nil, ErrInvalidCredentials
 	}
 	if err != nil {
@@ -74,11 +80,10 @@ func (s *Service) Login(ctx context.Context, email, password string) (*LoginResu
 	}
 
 	if user.PasswordHash == nil {
-		if compareErr := bcrypt.CompareHashAndPassword(dummyPasswordHash, []byte(password)); compareErr != nil {
-			// intentionally ignored: dummy compare is only for timing consistency
-		}
+		runDummyPasswordCompare(password)
 		return nil, ErrInvalidCredentials
 	}
+
 	if err := bcrypt.CompareHashAndPassword([]byte(*user.PasswordHash), []byte(password)); err != nil {
 		return nil, ErrInvalidCredentials
 	}
