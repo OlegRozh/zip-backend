@@ -33,7 +33,6 @@ import (
 	"github.com/Linka-masterskaya/zip-backend/internal/metrics"
 	"github.com/Linka-masterskaya/zip-backend/internal/middleware"
 	"github.com/Linka-masterskaya/zip-backend/internal/pack"
-	"github.com/Linka-masterskaya/zip-backend/internal/profile"
 	"github.com/Linka-masterskaya/zip-backend/internal/storage"
 	"github.com/Linka-masterskaya/zip-backend/migrations"
 )
