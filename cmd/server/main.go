@@ -131,6 +131,19 @@ func main() {
 	metricsMux.Handle("GET /metrics", metrics.NewHandler())
 	metricsMux.HandleFunc("GET /health", healthHandler(cfg.App.Env))
 
+	// если требуется обратная совместимость с портом 9090
+	/*
+		metricsMux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
+			status, body := checker.Run(r.Context())
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(status)
+			if err := json.NewEncoder(w).Encode(body); err != nil {
+				slog.Error("failed to encode /readyz response on metrics port", "err", err)
+			}
+		})
+	*/
+	// ====================================================
+
 	metricsSrv := &http.Server{
 		Addr:         ":9090",
 		Handler:      metricsMux,

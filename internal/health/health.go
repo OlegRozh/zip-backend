@@ -3,6 +3,8 @@ package health
 import (
 	"context"
 	"errors"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -38,7 +40,9 @@ type Checker struct {
 }
 
 // Run запускает параллельные проверки с таймаутом 2 секунды.
+// Возвращает HTTP статус и тело ответа.
 func (c *Checker) Run(ctx context.Context) (int, interface{}) {
+	// Контекст с таймаутом для всех проверок
 	checkCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
@@ -46,54 +50,64 @@ func (c *Checker) Run(ctx context.Context) (int, interface{}) {
 	var mu sync.Mutex
 	results := make(map[string]checkResult)
 
+	// Определяем проверки для каждой зависимости.
 	checks := map[string]func(context.Context) error{
 		"postgres": func(ctx context.Context) error {
-			if c.DB == nil {
-				return errors.New("postgres client not initialized")
-			}
 			return c.DB.Ping(ctx)
 		},
 		"redis": func(ctx context.Context) error {
-			if c.RedisClient == nil {
-				return errors.New("redis client not initialized")
-			}
 			return c.RedisClient.Ping(ctx)
 		},
 		"nats": func(ctx context.Context) error {
-			if c.NatsConn == nil {
-				return errors.New("nats client not initialized")
-			}
 			if !c.NatsConn.IsConnected() {
 				return errors.New("nats connection is closed")
 			}
 			return nil
 		},
 		"minio": func(ctx context.Context) error {
-			if c.MinioClient == nil {
-				return errors.New("minio client not initialized")
-			}
 			_, err := c.MinioClient.ListBuckets(ctx)
 			return err
 		},
 	}
 
+	// Запускаем проверки параллельно.
+	// Для Go 1.22+ не требуется явное присваивание переменных цикла, но оставим для ясности.
 	for name, check := range checks {
-		name, check := name, check
-		g.Go(func() error {
-			err := check(ctxGroup)
+		if ctxGroup.Err() != nil {
+			break
+		}
+		name, check := name, check // захват переменных для горутины для старых версий Go.
+		g.Go(func() (err error) {
+			// Защита от паники внутри проверки.
+			defer func() {
+				if r := recover(); r != nil {
+					mu.Lock()
+					defer mu.Unlock()
+					results[name] = checkResult{
+						Status: "error",
+						Error:  fmt.Sprintf("panic: %v", r),
+					}
+					err = nil
+				}
+			}()
+			if err := check(ctxGroup); err != nil {
+				mu.Lock()
+				defer mu.Unlock()
+				results[name] = checkResult{Status: "error", Error: err.Error()}
+				return nil
+			}
 			mu.Lock()
 			defer mu.Unlock()
-			if err == nil {
-				results[name] = checkResult{Status: "ok"}
-			} else {
-				results[name] = checkResult{Status: "error", Error: err.Error()}
-			}
+			results[name] = checkResult{Status: "ok"}
 			return nil
 		})
 	}
 
-	//nolint:errcheck // ошибки g.Wait игнорируются, т.к. все проверки уже обработаны в results
-	_ = g.Wait()
+	// Ожидаем завершения всех горутин.
+	// обрабатываем её на случай будущих изменений.
+	if err := g.Wait(); err != nil {
+		slog.Error("health: errgroup wait failed", "err", err)
+	}
 
 	finalStatus := "ok"
 	for _, res := range results {
