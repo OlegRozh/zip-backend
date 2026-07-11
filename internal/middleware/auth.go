@@ -10,7 +10,6 @@ import (
 
 	"github.com/Linka-masterskaya/zip-backend/internal/apperr"
 	"github.com/Linka-masterskaya/zip-backend/internal/authctx"
-	"github.com/Linka-masterskaya/zip-backend/internal/reqctx"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 )
@@ -76,7 +75,6 @@ func (m *AuthMW) AuthMiddleware(next AppHandler) AppHandler {
 
 		ctx := authctx.SetUserIDToCtx(r.Context(), userID)
 		ctx = authctx.SetRoleToCtx(ctx, claims.Role)
-		ctx = reqctx.PutUserID(ctx, userID.String())
 		return next(w, r.WithContext(ctx))
 	}
 }
