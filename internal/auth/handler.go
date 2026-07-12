@@ -184,14 +184,14 @@ func (h *authHandlers) RegisterRoutes(
 	}
 
 	mux.Handle(
-		"POST /auth/verify-email",
+		"POST /api/v1/auth/email-confirm",
 		verifyEmailIPLimit(
 			middleware.ErrorMiddleware(h.VerifyEmail),
 		),
 	)
 
 	mux.Handle(
-		"POST /auth/verify-email/resend",
+		"POST /api/v1/auth/verify-resend",
 		verifyResendIPLimit(
 			middleware.ErrorMiddleware(
 				authMW.AuthMiddleware(
