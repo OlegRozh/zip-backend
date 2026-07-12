@@ -28,6 +28,15 @@ type Config struct {
 	RateLimit    RateLimitConfig    `mapstructure:"rate_limit"`
 }
 
+// CryptoConfig contains encryption and hashing settings.
+type CryptoConfig struct {
+	AESKeyRaw  string `mapstructure:"aes_key"`
+	HMACKeyRaw string `mapstructure:"hmac_key"`
+
+	AESKey  []byte `mapstructure:"-"`
+	HMACKey []byte `mapstructure:"-"`
+}
+
 // AppConfig contains application runtime settings.
 type AppConfig struct {
 	Env            string   `mapstructure:"env"`
@@ -120,15 +129,6 @@ type JWTConfig struct {
 	RefreshTTL time.Duration `mapstructure:"refresh_ttl"`
 }
 
-// CryptoConfig contains keys for email encryption and hashing.
-type CryptoConfig struct {
-	AESKeyRaw  string `mapstructure:"aes_key"`
-	HMACKeyRaw string `mapstructure:"hmac_key"`
-
-	AESKey  []byte `mapstructure:"-"`
-	HMACKey []byte `mapstructure:"-"`
-}
-
 type RateLimitConfig struct {
 	Resend RateLimitRule `mapstructure:"resend"`
 	Login  RateLimitRule `mapstructure:"login"`
@@ -181,6 +181,7 @@ type AuthConfig struct {
 	EmailChangeTokenTTL      time.Duration `mapstructure:"email_change_token_ttl"`
 	BcryptCost               int           `mapstructure:"bcrypt_cost"`
 	RequireEmailVerification bool          `mapstructure:"require_email_verification"`
+	CookieSecure             bool          `mapstructure:"cookie_secure"`
 	LoginRateLimit           int           `mapstructure:"login_rate_limit"`
 	PackRateLimit            int           `mapstructure:"pack_rate_limit"`
 	ForgotRateLimit          int           `mapstructure:"forgot_rate_limit"`
@@ -309,15 +310,15 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("smtp.tls", true)
 	v.SetDefault("smtp.timeout", "10s")
 
+	// Crypto defaults
+	v.SetDefault("crypto.aes_key", "")
+	v.SetDefault("crypto.hmac_key", "")
+
 	// Auth defaults
-	v.SetDefault("auth.access_token_ttl", "15m")
-	v.SetDefault("auth.refresh_token_ttl", "720h")
-	v.SetDefault("auth.verify_email_token_ttl", "24h")
-	v.SetDefault("auth.reset_password_token_ttl", "1h")
-	v.SetDefault("auth.email_change_token_ttl", "1h")
 	v.SetDefault("auth.bcrypt_cost", 12)
 	v.SetDefault("auth.login_rate_limit", 5)
 	v.SetDefault("auth.require_email_verification", false)
+	v.SetDefault("auth.cookie_secure", false)
 	v.SetDefault("auth.pack_rate_limit", 60)
 	v.SetDefault("auth.forgot_rate_limit", 3)
 	v.SetDefault("auth.reset_rate_limit", 3)
@@ -403,13 +404,13 @@ func validateConfig(cfg *Config) error {
 	}
 	cfg.Crypto.AESKey = aes
 
-	hmac, err := base64.StdEncoding.DecodeString(cfg.Crypto.HMACKeyRaw)
+	hmacKey, err := base64.StdEncoding.DecodeString(cfg.Crypto.HMACKeyRaw)
 	if err != nil {
 		return fmt.Errorf("crypto.hmac_key: invalid base64: %w", err)
 	}
-	if len(hmac) < 32 {
-		return fmt.Errorf("crypto.hmac_key: must be at least 32 bytes, got %d", len(hmac))
+	if len(hmacKey) < 32 {
+		return fmt.Errorf("crypto.hmac_key: must be at least 32 bytes, got %d", len(hmacKey))
 	}
-	cfg.Crypto.HMACKey = hmac
+	cfg.Crypto.HMACKey = hmacKey
 	return nil
 }

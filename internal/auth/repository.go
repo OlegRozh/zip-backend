@@ -14,6 +14,16 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+var ErrUserNotFound = errors.New("user not found")
+
+type User struct {
+	ID            string
+	OrgID         *string
+	PasswordHash  *string
+	Role          string
+	EmailVerified bool
+}
+
 type DBTX interface {
 	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
 	Query(context.Context, string, ...any) (pgx.Rows, error)
@@ -32,10 +42,42 @@ func NewAuthRepo(pool *pgxpool.Pool) authRepoIface {
 	}
 }
 
+func (r *authRepo) GetUserByEmailHash(ctx context.Context, emailHash []byte) (*User, error) {
+	var user User
+
+	query := `
+		SELECT
+			u.id,
+			u.org_id,
+			ac.password_hash,
+			ac.role,
+			u.email_verified
+		FROM users u
+		JOIN auth_cred ac ON ac.user_id = u.id
+		WHERE ac.email_hash = $1
+	`
+
+	err := r.db.QueryRow(ctx, query, emailHash).Scan(
+		&user.ID,
+		&user.OrgID,
+		&user.PasswordHash,
+		&user.Role,
+		&user.EmailVerified,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrUserNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("authRepo.GetUserByEmailHash: %w", err)
+	}
+
+	return &user, nil
+}
+
 func (r *authRepo) withTx(tx pgx.Tx) authRepoIface {
 	return &authRepo{
 		db:   tx,
-		pool: nil, // чтобы никто не мог вызвать еще раз в текущей tx
+		pool: nil,
 	}
 }
 
@@ -52,7 +94,10 @@ func (r *authRepo) beginTx(ctx context.Context) (pgx.Tx, error) {
 	return tx, nil
 }
 
-func (r *authRepo) useEmailVerifyToken(ctx context.Context, token []byte) (uuid.UUID, uuid.UUID, error) {
+func (r *authRepo) useEmailVerifyToken(
+	ctx context.Context,
+	token []byte,
+) (uuid.UUID, uuid.UUID, error) {
 	query := `
 		UPDATE verify_tokens
 		SET used_at = now()
@@ -61,7 +106,7 @@ func (r *authRepo) useEmailVerifyToken(ctx context.Context, token []byte) (uuid.
 			AND used_at IS NULL
 			AND expires_at > now()
 		RETURNING user_id, student_id
-		`
+	`
 
 	var userIDDB, studentIDDB pgtype.UUID
 	err := r.db.QueryRow(ctx, query, token).Scan(&userIDDB, &studentIDDB)
@@ -79,6 +124,7 @@ func (r *authRepo) useEmailVerifyToken(ctx context.Context, token []byte) (uuid.
 	if studentIDDB.Valid {
 		studentID = uuid.UUID(studentIDDB.Bytes)
 	}
+
 	return userID, studentID, nil
 }
 
@@ -86,8 +132,10 @@ func (r *authRepo) verifyUser(ctx context.Context, userID uuid.UUID) error {
 	query := `
 		UPDATE users
 		SET email_verified = true
-		WHERE id = $1 AND email_verified = false AND deleted_at IS NULL
-		`
+		WHERE id = $1
+			AND email_verified = false
+			AND deleted_at IS NULL
+	`
 
 	res, err := r.db.Exec(ctx, query, userID)
 	if err != nil {
@@ -97,9 +145,13 @@ func (r *authRepo) verifyUser(ctx context.Context, userID uuid.UUID) error {
 		return apperr.ErrVerifyTokenInvalid
 	}
 
-	_, err = r.db.Exec(ctx,
-		`UPDATE verify_tokens SET used_at = now()
-	 WHERE user_id = $1 AND purpose = 'email_verify' AND used_at IS NULL`,
+	_, err = r.db.Exec(
+		ctx,
+		`UPDATE verify_tokens
+		 SET used_at = now()
+		 WHERE user_id = $1
+		   AND purpose = 'email_verify'
+		   AND used_at IS NULL`,
 		userID,
 	)
 	if err != nil {
@@ -113,8 +165,10 @@ func (r *authRepo) verifyStudent(ctx context.Context, studentID uuid.UUID) error
 	query := `
 		UPDATE students
 		SET email_verified = true
-		WHERE id = $1 AND email_verified = false AND deleted_at IS NULL
-		`
+		WHERE id = $1
+			AND email_verified = false
+			AND deleted_at IS NULL
+	`
 
 	res, err := r.db.Exec(ctx, query, studentID)
 	if err != nil {
@@ -124,9 +178,13 @@ func (r *authRepo) verifyStudent(ctx context.Context, studentID uuid.UUID) error
 		return apperr.ErrVerifyTokenInvalid
 	}
 
-	_, err = r.db.Exec(ctx,
-		`UPDATE verify_tokens SET used_at = now()
-	 WHERE student_id = $1 AND purpose = 'email_verify' AND used_at IS NULL`,
+	_, err = r.db.Exec(
+		ctx,
+		`UPDATE verify_tokens
+		 SET used_at = now()
+		 WHERE student_id = $1
+		   AND purpose = 'email_verify'
+		   AND used_at IS NULL`,
 		studentID,
 	)
 	if err != nil {
@@ -136,16 +194,29 @@ func (r *authRepo) verifyStudent(ctx context.Context, studentID uuid.UUID) error
 	return nil
 }
 
-func (r *authRepo) rotateEmailTokens(ctx context.Context, tokenID, userID uuid.UUID, tokenHash []byte, expiresAt time.Time) error {
+func (r *authRepo) rotateEmailTokens(
+	ctx context.Context,
+	tokenID, userID uuid.UUID,
+	tokenHash []byte,
+	expiresAt time.Time,
+) error {
 	query := `
 		WITH invalidated AS (
 			UPDATE verify_tokens
 			SET used_at = now()
-			WHERE user_id = $1 AND used_at IS NULL AND purpose = 'email_verify'
+			WHERE user_id = $1
+				AND used_at IS NULL
+				AND purpose = 'email_verify'
 			RETURNING 1
-	)
-	INSERT INTO verify_tokens (id, user_id, token_hash, expires_at, purpose)
-	VALUES ($2, $1, $3, $4, 'email_verify')
+		)
+		INSERT INTO verify_tokens (
+			id,
+			user_id,
+			token_hash,
+			expires_at,
+			purpose
+		)
+		VALUES ($2, $1, $3, $4, 'email_verify')
 	`
 
 	_, err := r.db.Exec(ctx, query, userID, tokenID, tokenHash, expiresAt)
@@ -156,18 +227,24 @@ func (r *authRepo) rotateEmailTokens(ctx context.Context, tokenID, userID uuid.U
 	return nil
 }
 
-func (r *authRepo) getUserContactForResend(ctx context.Context, userID uuid.UUID) ([]byte, bool, error) {
+func (r *authRepo) getUserContactForResend(
+	ctx context.Context,
+	userID uuid.UUID,
+) ([]byte, bool, error) {
 	var (
 		emailEncrypted []byte
 		emailVerified  bool
 	)
 
-	err := r.db.QueryRow(ctx,
-		`SELECT c.email_encrypted, u.email_verified
-		FROM users u
-		JOIN auth_cred c ON c.user_id = u.id
-		WHERE u.id = $1 AND u.deleted_at IS NULL`,
-		userID).Scan(&emailEncrypted, &emailVerified)
+	err := r.db.QueryRow(
+		ctx,
+		`SELECT ac.email_encrypted, u.email_verified
+		 FROM users u
+		 JOIN auth_cred ac ON ac.user_id = u.id
+		 WHERE u.id = $1
+		   AND u.deleted_at IS NULL`,
+		userID,
+	).Scan(&emailEncrypted, &emailVerified)
 
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, false, apperr.ErrUserNotFound

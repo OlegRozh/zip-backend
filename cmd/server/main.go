@@ -67,13 +67,24 @@ func run() error {
 	packHandler := pack.NewHandler(packService)
 
 	authRepo := auth.NewAuthRepo(deps.db)
-	authService := auth.NewAuthService(authRepo, deps.redis, deps.mailer, auth.Config{
+
+	authCfg := auth.Config{
+		JWTSecret:                deps.cfg.JWT.Secret,
 		FrontendURL:              deps.cfg.App.FrontendURL,
 		AccessTokenTTL:           deps.cfg.Auth.AccessTokenTTL,
 		RefreshTokenTTL:          deps.cfg.Auth.RefreshTokenTTL,
 		VerifyEmailTokenTTL:      deps.cfg.Auth.VerifyEmailTokenTTL,
 		RequireEmailVerification: deps.cfg.Auth.RequireEmailVerification,
-	}, deps.crypto)
+		CookieSecure:             deps.cfg.Auth.CookieSecure,
+	}
+
+	authService := auth.NewAuthService(
+		authRepo,
+		deps.redis,
+		deps.mailer,
+		authCfg,
+		deps.crypto,
+	)
 
 	packRateLimit := middleware.RateLimit(deps.redis, "packs_api", int64(deps.cfg.Auth.PackRateLimit), 1*time.Minute, deps.cfg.App.TrustedProxies)
 	loginRateLimit := middleware.RateLimit(deps.redis, "login", int64(deps.cfg.Auth.LoginRateLimit), 1*time.Minute, deps.cfg.App.TrustedProxies)
@@ -87,12 +98,42 @@ func run() error {
 	mainMux.Handle("GET /api/v1/packs/{id}", packRateLimit(middleware.ErrorMiddleware(packHandler.GetPack)))
 	mainMux.Handle("GET /api/v1/packs", packRateLimit(middleware.ErrorMiddleware(packHandler.ListPacks)))
 
-	authHandler := auth.NewAuthHandler(authService)
-	mainMux.Handle("POST /auth/login", loginRateLimit(http.HandlerFunc(authHandler.Login)))
-	mainMux.Handle("POST /auth/forgot", forgotRateLimit(http.HandlerFunc(authHandler.ForgotPassword)))
-	mainMux.Handle("POST /auth/reset", resetRateLimit(http.HandlerFunc(authHandler.ResetPassword)))
-	mainMux.Handle("POST /auth/verify-resend", verifyResendRateLimit(http.HandlerFunc(authHandler.VerifyResend)))
-	mainMux.Handle("POST /auth/email-confirm", emailConfirmRateLimit(http.HandlerFunc(authHandler.EmailConfirm)))
+	authHandler := auth.NewAuthHandler(authService, authCfg)
+
+	mainMux.Handle(
+		"POST /auth/login",
+		loginRateLimit(
+			middleware.ErrorMiddleware(authHandler.Login),
+		),
+	)
+
+	mainMux.Handle(
+		"POST /auth/forgot",
+		forgotRateLimit(
+			middleware.ErrorMiddleware(authHandler.ForgotPassword),
+		),
+	)
+
+	mainMux.Handle(
+		"POST /auth/reset",
+		resetRateLimit(
+			middleware.ErrorMiddleware(authHandler.ResetPassword),
+		),
+	)
+
+	mainMux.Handle(
+		"POST /auth/verify-resend",
+		verifyResendRateLimit(
+			middleware.ErrorMiddleware(authHandler.VerifyResend),
+		),
+	)
+
+	mainMux.Handle(
+		"POST /auth/email-confirm",
+		emailConfirmRateLimit(
+			middleware.ErrorMiddleware(authHandler.EmailConfirm),
+		),
+	)
 
 	authMW := middleware.NewAuthMW([]byte(deps.cfg.JWT.Secret))
 	authHandler.RegisterRoutes(mainMux, authMW, deps.redis, deps.cfg)
