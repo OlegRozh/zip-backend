@@ -3,7 +3,6 @@ package reqctx
 import "context"
 
 type ctxKeyRequestID struct{}
-
 type ctxKeyUserID struct{}
 
 // GetRequestID извлекает уникальный ID запроса из контекста выполнения.
