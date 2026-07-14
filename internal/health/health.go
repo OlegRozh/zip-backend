@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
 	"sync"
 	"time"
 
@@ -41,10 +42,33 @@ type response struct {
 
 // Checker содержит клиенты для проверки зависимостей.
 type Checker struct {
-	DB          Pinger
-	RedisClient Pinger
-	NatsConn    ConnectionChecker
-	MinioClient Lister
+	db          Pinger
+	redisClient Pinger
+	natsConn    ConnectionChecker
+	minioClient Lister
+}
+
+// NewChecker validates health dependencies before endpoint registration.
+func NewChecker(db Pinger, redisClient Pinger, natsConn ConnectionChecker, minioClient Lister) (*Checker, error) {
+	if isNilDependency(db) {
+		return nil, errors.New("postgres client not initialized")
+	}
+	if isNilDependency(redisClient) {
+		return nil, errors.New("redis client not initialized")
+	}
+	if isNilDependency(natsConn) {
+		return nil, errors.New("nats client not initialized")
+	}
+	if isNilDependency(minioClient) {
+		return nil, errors.New("minio client not initialized")
+	}
+
+	return &Checker{
+		db:          db,
+		redisClient: redisClient,
+		natsConn:    natsConn,
+		minioClient: minioClient,
+	}, nil
 }
 
 // Run запускает параллельные проверки с таймаутом 2 секунды на каждую проверку.
@@ -93,18 +117,32 @@ func (c *Checker) Run(ctx context.Context) (int, interface{}) {
 
 func (c *Checker) checks() map[string]func(context.Context) error {
 	return map[string]func(context.Context) error{
-		"postgres": c.DB.Ping,
-		"redis":    c.RedisClient.Ping,
+		"postgres": c.db.Ping,
+		"redis":    c.redisClient.Ping,
 		"nats": func(context.Context) error {
-			if !c.NatsConn.IsConnected() {
+			if !c.natsConn.IsConnected() {
 				return errors.New("nats connection is closed")
 			}
 			return nil
 		},
 		"minio": func(ctx context.Context) error {
-			_, err := c.MinioClient.ListBuckets(ctx)
+			_, err := c.minioClient.ListBuckets(ctx)
 			return err
 		},
+	}
+}
+
+func isNilDependency(dependency any) bool {
+	if dependency == nil {
+		return true
+	}
+
+	value := reflect.ValueOf(dependency)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
 	}
 }
 
