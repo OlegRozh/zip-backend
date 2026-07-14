@@ -108,9 +108,6 @@ func main() {
 	mainMux.Handle("GET /api/v1/packs/{id}", middleware.ErrorMiddleware(packHandler.GetPack))
 	mainMux.Handle("GET /api/v1/packs", middleware.ErrorMiddleware(packHandler.ListPacks))
 
-	// Регистрация health эндпоинтов
-	setupHealthEndpoints(mainMux, checker)
-
 	wrappedHandler := middleware.Chain(
 		mainMux,
 		middleware.RecoveryMiddleware,
@@ -130,22 +127,10 @@ func main() {
 	metricsMux := http.NewServeMux()
 	metricsMux.Handle("GET /metrics", metrics.NewHandler())
 	metricsMux.HandleFunc("GET /health", healthHandler(cfg.App.Env))
-
-	// если требуется обратная совместимость с портом 9090
-	/*
-		metricsMux.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {
-			status, body := checker.Run(r.Context())
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(status)
-			if err := json.NewEncoder(w).Encode(body); err != nil {
-				slog.Error("failed to encode /readyz response on metrics port", "err", err)
-			}
-		})
-	*/
-	// ====================================================
+	setupHealthEndpoints(metricsMux, checker)
 
 	metricsSrv := &http.Server{
-		Addr:         ":9090",
+		Addr:         ":9091",
 		Handler:      metricsMux,
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 5 * time.Second,
@@ -253,10 +238,10 @@ func runMigrationsIfNeeded(cfg *config.Config) {
 	os.Exit(0)
 }
 
-// setupHealthEndpoints регистрирует эндпоинты /livez и /readyz на основном мультиплексоре.
+// setupHealthEndpoints регистрирует эндпоинты /livez и /readyz на health/metrics мультиплексоре.
 func setupHealthEndpoints(mux *http.ServeMux, checker *health.Checker) {
 	// /livez — всегда 200 OK, без проверок
-	mux.HandleFunc("GET /livez", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /livez", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		if err := json.NewEncoder(w).Encode(map[string]string{"status": "alive"}); err != nil {
