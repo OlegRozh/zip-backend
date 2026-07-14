@@ -4,21 +4,24 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"sync"
 	"time"
 
 	"github.com/minio/minio-go/v7"
-	"github.com/nats-io/nats.go"
 	"golang.org/x/sync/errgroup"
-
-	"github.com/Linka-masterskaya/zip-backend/internal/cache"
 )
 
-// Pinger — интерфейс для проверки PostgreSQL.
+const checkTimeout = 2 * time.Second
+
+// Pinger — интерфейс для проверки зависимости через Ping.
 type Pinger interface {
 	Ping(ctx context.Context) error
+}
+
+// ConnectionChecker — интерфейс для проверки состояния подключения.
+type ConnectionChecker interface {
+	IsConnected() bool
 }
 
 // Lister — интерфейс для проверки MinIO.
@@ -31,34 +34,68 @@ type checkResult struct {
 	Error  string `json:"error,omitempty"`
 }
 
+type response struct {
+	Status string                 `json:"status"`
+	Checks map[string]checkResult `json:"checks"`
+}
+
 // Checker содержит клиенты для проверки зависимостей.
 type Checker struct {
 	DB          Pinger
-	RedisClient *cache.Client
-	NatsConn    *nats.Conn
+	RedisClient Pinger
+	NatsConn    ConnectionChecker
 	MinioClient Lister
 }
 
-// Run запускает параллельные проверки с таймаутом 2 секунды.
+// Run запускает параллельные проверки с таймаутом 2 секунды на каждую проверку.
 // Возвращает HTTP статус и тело ответа.
 func (c *Checker) Run(ctx context.Context) (int, interface{}) {
-	// Контекст с таймаутом для всех проверок
-	checkCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-
-	g, ctxGroup := errgroup.WithContext(checkCtx)
+	checks := c.checks()
+	results := make(map[string]checkResult, len(checks))
+	var group errgroup.Group
 	var mu sync.Mutex
-	results := make(map[string]checkResult)
 
-	// Определяем проверки для каждой зависимости.
-	checks := map[string]func(context.Context) error{
-		"postgres": func(ctx context.Context) error {
-			return c.DB.Ping(ctx)
-		},
-		"redis": func(ctx context.Context) error {
-			return c.RedisClient.Ping(ctx)
-		},
-		"nats": func(ctx context.Context) error {
+	setResult := func(name string, err error) {
+		result := checkResult{Status: "ok"}
+		if err != nil {
+			result = checkResult{Status: "error", Error: err.Error()}
+		}
+		mu.Lock()
+		results[name] = result
+		mu.Unlock()
+	}
+
+	for name, check := range checks {
+		if err := ctx.Err(); err != nil {
+			setResult(name, err)
+		} else {
+			group.Go(func() error {
+				err := runCheck(ctx, check)
+				setResult(name, err)
+				return err
+			})
+		}
+	}
+
+	waitErr := group.Wait()
+	status := "ok"
+	httpStatus := http.StatusOK
+	if waitErr != nil || hasErrors(results) {
+		status = "degraded"
+		httpStatus = http.StatusServiceUnavailable
+	}
+
+	return httpStatus, response{
+		Status: status,
+		Checks: results,
+	}
+}
+
+func (c *Checker) checks() map[string]func(context.Context) error {
+	return map[string]func(context.Context) error{
+		"postgres": c.DB.Ping,
+		"redis":    c.RedisClient.Ping,
+		"nats": func(context.Context) error {
 			if !c.NatsConn.IsConnected() {
 				return errors.New("nats connection is closed")
 			}
@@ -69,65 +106,26 @@ func (c *Checker) Run(ctx context.Context) (int, interface{}) {
 			return err
 		},
 	}
+}
 
-	// Запускаем проверки параллельно.
-	// Для Go 1.22+ не требуется явное присваивание переменных цикла, но оставим для ясности.
-	for name, check := range checks {
-		if ctxGroup.Err() != nil {
-			break
+func runCheck(ctx context.Context, check func(context.Context) error) (err error) {
+	checkCtx, cancel := context.WithTimeout(ctx, checkTimeout)
+	defer cancel()
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("panic: %v", recovered)
 		}
-		name, check := name, check // захват переменных для горутины для старых версий Go.
-		g.Go(func() (err error) {
-			// Защита от паники внутри проверки.
-			defer func() {
-				if r := recover(); r != nil {
-					mu.Lock()
-					defer mu.Unlock()
-					results[name] = checkResult{
-						Status: "error",
-						Error:  fmt.Sprintf("panic: %v", r),
-					}
-					err = nil
-				}
-			}()
-			if err := check(ctxGroup); err != nil {
-				mu.Lock()
-				defer mu.Unlock()
-				results[name] = checkResult{Status: "error", Error: err.Error()}
-				return nil
-			}
-			mu.Lock()
-			defer mu.Unlock()
-			results[name] = checkResult{Status: "ok"}
-			return nil
-		})
-	}
+	}()
 
-	// Ожидаем завершения всех горутин.
-	// обрабатываем её на случай будущих изменений.
-	if err := g.Wait(); err != nil {
-		slog.Error("health: errgroup wait failed", "err", err)
-	}
+	return check(checkCtx)
+}
 
-	finalStatus := "ok"
-	for _, res := range results {
-		if res.Status == "error" {
-			finalStatus = "degraded"
-			break
+func hasErrors(results map[string]checkResult) bool {
+	hasError := false
+	for _, result := range results {
+		if result.Status == "error" {
+			hasError = true
 		}
 	}
-
-	httpStatus := http.StatusOK
-	if finalStatus == "degraded" {
-		httpStatus = http.StatusServiceUnavailable
-	}
-
-	response := struct {
-		Status string                 `json:"status"`
-		Checks map[string]checkResult `json:"checks"`
-	}{
-		Status: finalStatus,
-		Checks: results,
-	}
-	return httpStatus, response
+	return hasError
 }
