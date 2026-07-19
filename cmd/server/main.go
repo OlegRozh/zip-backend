@@ -179,7 +179,7 @@ func run() error {
 	setupHealthEndpoints(metricsMux, checker)
 
 	metricsSrv := &http.Server{
-		Addr:         ":9091",
+		Addr:         ":9090",
 		Handler:      metricsMux,
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 5 * time.Second,
@@ -318,7 +318,7 @@ func initNATS(cfg config.NATSConfig) (*nats.Conn, *broker.Publisher, error) {
 func healthHandler(env string) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok", "env": env}); err != nil {
+		if err := json.NewEncoder(w).Encode(map[string]any{"status": health.StatusOK, "env": env}); err != nil {
 			slog.Error("health response encode failed", logger.Err(err))
 		}
 	}
@@ -358,7 +358,7 @@ func setupHealthEndpoints(mux *http.ServeMux, checker *health.Checker) {
 	mux.HandleFunc("GET /livez", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		if err := json.NewEncoder(w).Encode(map[string]string{"status": "alive"}); err != nil {
+		if err := json.NewEncoder(w).Encode(map[string]health.Status{"status": health.StatusAlive}); err != nil {
 			slog.Error("failed to encode /livez response", "err", err)
 		}
 	})
