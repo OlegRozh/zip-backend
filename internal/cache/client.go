@@ -226,7 +226,7 @@ func (c *Client) StoreRefresh(ctx context.Context, jti string, rec RefreshRecord
 	return nil
 }
 
-// RevokeAllSessions invalidates every refresh token issued so far for a user,
+// RevokeAllSessions invalidates every refresh token issued so far for a user.
 func (c *Client) RevokeAllSessions(ctx context.Context, userID string) error {
 	if err := c.rdb.Incr(ctx, "user_session_version:"+userID).Err(); err != nil {
 		return fmt.Errorf("redis.RevokeAllSessions: %w", err)
