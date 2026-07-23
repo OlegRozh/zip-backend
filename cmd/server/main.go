@@ -15,9 +15,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Linka-masterskaya/zip-backend/internal/auth"
+	"github.com/Linka-masterskaya/zip-backend/pkg/linka/cryptox"
 	_ "github.com/lib/pq"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/yandex"
 
 	"github.com/Linka-masterskaya/zip-backend/internal/broker"
 	"github.com/Linka-masterskaya/zip-backend/internal/cache"
